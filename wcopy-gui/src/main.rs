@@ -755,16 +755,16 @@ impl eframe::App for App {
                     id.copy_from_slice(&b);
                     id
                 });
-                let risky = matches!(&parsed_lf, Ok(id) if wcopy::lf_id_likely_unsupported(id));
+                let risky = matches!(&parsed_lf, Ok(id) if wcopy::lf_id_unreadable(id));
                 match &parsed_lf {
                     Ok(_) if risky => {
                         ui.colored_label(
                             egui::Color32::from_rgb(200, 140, 40),
                             format!(
-                                "first byte ≥ 0x{:02X} reliably fails on real hardware \
-                                 (confirmed via this tool and the vendor's own app) and can \
-                                 leave the tag temporarily unreadable -- write disabled",
-                                wcopy::LF_WRITE_RISKY_FIRST_BYTE
+                                "first byte ≥ 0x{:02X}: this reader can't read such IDs, \
+                                 so the write can't be verified here -- check with another \
+                                 reader (e.g. Flipper)",
+                                wcopy::LF_UNREADABLE_FIRST_BYTE
                             ),
                         );
                     }
@@ -776,7 +776,7 @@ impl eframe::App for App {
                 ui.label("Requires a writable T5577/5200 tag.");
                 if ui
                     .add_enabled(
-                        can_op && parsed_lf.is_ok() && !risky,
+                        can_op && parsed_lf.is_ok(),
                         egui::Button::new("Write to tag"),
                     )
                     .clicked()

@@ -906,6 +906,10 @@ impl WCopy {
 
     /// Read a 125 kHz EM4100/EM4102 tag's ID. Returns `None` if no tag is on the reader
     /// (the device replies with a single `0x00` byte). Call [`WCopy::lf_init`] once first.
+    ///
+    /// **Firmware blind spot:** tags whose ID starts with a nibble ≥ 8 (first byte
+    /// `0x80`–`0xFF`) are never detected and also return `None` (no beep, not even in the
+    /// vendor's own tool); see [`lf_id_unreadable`].
     pub fn lf_read_em4100(&mut self) -> Result<Option<LfId>> {
         let d = self.transceive_vendor(
             LF_OP_READ_EM4100,
@@ -934,13 +938,11 @@ impl WCopy {
     /// "WriteT5577/5200" button). Verified against real hardware across several different
     /// target IDs on a genuine T5577 blank, each confirmed by reading it back afterwards.
     ///
-    /// **Caveat, confirmed on real hardware:** an `id` whose first byte (the EM4100
-    /// version/customer byte) is very high — `0x98`/`0x99` tested — reliably fails and can
-    /// leave the tag temporarily unreadable (recovered by writing a working ID again; no
-    /// permanent damage seen). This reproduces identically through the **vendor's own**
-    /// nfcPro tool, not just this reimplementation, so it looks like a real limitation of the
-    /// tag/reader rather than a bug here. `0x00`, `0x07`, `0x12` all wrote fine; the exact
-    /// cutoff wasn't determined. Treat a very high first byte as unsupported for now.
+    /// **Caveat:** an `id` with first byte `0x80`–`0xFF` cannot be read back by this reader
+    /// (see [`lf_id_unreadable`]), so such a write can't be verified here — the tag then looks
+    /// "unreadable" to this reader, though other readers (e.g. a Flipper) may read it fine.
+    /// Earlier observations of `0x98`/`0x99` writes "failing" (also in the vendor's own
+    /// nfcPro tool) are explained by this read-side limitation.
     ///
     /// Two of the raw block writes below (`block1`/`block2`) carry the **standard EM4100
     /// 64-bit encoded bitstream** for `id` — header + 10×(nibble + row parity) + column
@@ -1008,19 +1010,20 @@ impl WCopy {
     }
 }
 
-/// First-byte threshold above which [`lf_id_likely_unsupported`] flags an ID. Confirmed
-/// failing on real hardware at `0x98`/`0x99` (both through this driver and through the
-/// vendor's own nfcPro tool); the exact cutoff below that wasn't determined, so this is a
-/// conservative (possibly over-wide) guess, not a proven boundary.
-pub const LF_WRITE_RISKY_FIRST_BYTE: u8 = 0x98;
+/// First byte from which this reader's firmware can no longer detect an EM4100 tag.
+///
+/// Confirmed on real hardware (2026-11-16) with genuine EM4100 cards and Flipper Zero
+/// emulation: IDs `07…`, `7F…` are read, `80…`, `87…`, `F0…` are not detected at all (no
+/// beep, also in the vendor's own nfcPro tool) while a Flipper reads them fine. Likely cause:
+/// the firmware syncs on the 9 header `1` bits followed by a `0`; when the ID's top bit is
+/// `1` the stream has 10 consecutive `1`s and the header is never found. Not fixable host-side.
+pub const LF_UNREADABLE_FIRST_BYTE: u8 = 0x80;
 
-/// True if `id`'s first byte (the EM4100 version/customer byte) is at or above
-/// [`LF_WRITE_RISKY_FIRST_BYTE`], where [`WCopy::lf_write_em4100`] is known to reliably fail
-/// and can leave the tag temporarily unreadable. Callers (the CLI, the GUI) should warn
-/// before, or refuse to, write such an ID — this function doesn't refuse on its own, since
-/// read-only diagnostics and future chip families may want to try anyway.
-pub fn lf_id_likely_unsupported(id: &LfId) -> bool {
-    id[0] >= LF_WRITE_RISKY_FIRST_BYTE
+/// True if this reader cannot detect a tag carrying `id` (first nibble ≥ 8), see
+/// [`LF_UNREADABLE_FIRST_BYTE`]. Such an ID can still be written to a T5577, but the write
+/// cannot be verified by reading it back on this reader.
+pub fn lf_id_unreadable(id: &LfId) -> bool {
+    id[0] >= LF_UNREADABLE_FIRST_BYTE
 }
 
 /// Standard EM4100/EM4102 64-bit encoded bitstream for a 5-byte (40-bit) tag ID: 9 header
@@ -1113,6 +1116,13 @@ mod tests {
 
     // -- 125 kHz LF (vendor MCU) framing, bytes taken from a real USB capture of the
     // vendor's Windows tool reading an EM4100 card with ID 07 00 CD 6D 41. --------------- //
+
+    #[test]
+    fn lf_unreadable_boundary() {
+        assert!(!lf_id_unreadable(&[0x7F, 0, 0, 0, 1]));
+        assert!(lf_id_unreadable(&[0x80, 0, 0, 0, 1]));
+        assert!(lf_id_unreadable(&[0x87, 0x00, 0x97, 0xD7, 0x23]));
+    }
 
     #[test]
     fn lf_device_info_report_bytes() {

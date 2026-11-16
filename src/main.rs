@@ -295,6 +295,11 @@ fn run() -> Result<(), Error> {
                 id.iter().map(|b| format!("{b:02X}")).collect::<String>(),
                 back.iter().map(|b| format!("{b:02X}")).collect::<String>()
             ),
+            None if wcopy::lf_id_unreadable(&id) => println!(
+                "wrote LF ID, but this reader cannot read IDs with first byte >= 0x{:02X} \
+                 -- verify with another reader (e.g. Flipper)",
+                wcopy::LF_UNREADABLE_FIRST_BYTE
+            ),
             None => println!("wrote LF ID, but could not read a tag back to verify"),
         }
     }

@@ -155,11 +155,15 @@ touch this code; recompute `block1`/`block2` from `id` instead.
 
 Needs ~100ms between frames (sent back-to-back, every reply still parses fine but the write
 silently doesn't take). Doesn't work on a genuine (factory read-only) EM4100 tag — none of the
-vendor tool's own type-specific write buttons do either, confirmed on real hardware. **Also
-confirmed failing, identically, through the vendor's own tool:** an `id` whose first byte (the
-EM4100 version/customer byte) is very high (`0x98`/`0x99` tested) — can leave the tag
-temporarily unreadable (recovered by writing a working ID again, no permanent damage seen in
-testing). `0x00`/`0x07`/`0x12` all wrote fine; the exact cutoff wasn't determined.
+vendor tool's own type-specific write buttons do either, confirmed on real hardware.
+
+**Reader blind spot: EM4100 IDs with first byte `0x80`–`0xFF` are never detected** (no beep,
+read returns "no tag") — confirmed with genuine cards and Flipper Zero emulation
+(`07…`/`7F…` read, `80…`/`87…`/`F0…` not; a Flipper reads them all), identically in the
+vendor's own nfcPro tool, so it's a firmware limitation, not fixable host-side. Probable cause:
+the firmware syncs on 9 header `1`s followed by a `0`, and a set top ID bit makes 10 `1`s in a
+row. Writing such an ID to a T5577 is not blocked, but it can't be verified on this reader —
+which also explains earlier "failed" `0x98`/`0x99` writes. See `wcopy::lf_id_unreadable`.
 
 LF write for `EM4305`/`EL8265`/other chip families: not attempted — no hardware to verify
 against. The EM4100 bitstream math above is chip-agnostic and should carry over, but the outer
